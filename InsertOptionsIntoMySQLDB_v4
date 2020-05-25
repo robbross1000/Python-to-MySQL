@@ -1,0 +1,565 @@
+# RRoss 20200523
+from datetime import date, time
+from datetime import datetime, timedelta
+import datetime
+import calendar
+import pyodbc
+import os
+import time
+import re
+
+#===================================================
+def GetThirdFridayDate(iYear, iMonth):
+    first_day_of_month = datetime.datetime(int(iYear), int(iMonth), 1)
+    first_friday = first_day_of_month + timedelta(days=((4-calendar.monthrange(iYear,iMonth)[0])+7)%7)
+    # 4 is friday of week
+    third_friday = first_friday + timedelta(days=14)
+    return third_friday
+
+#===================================================
+def DateToMySQLFormat(DateToConvert):
+    #print(DateToConvert)
+    sDate = str(DateToConvert)
+    #i1stSlash = DateToConvert.find('/')
+    #sMonth = DateToConvert[:i1stSlash]
+    #i2ndSlash = DateToConvert.find('/', i1stSlash + 1)
+    #print('sDate: ' + sDate)
+    i1stSlash = sDate.find('/')
+    #print('i1stSlash: ' + str(i1stSlash))
+    
+    if (i1stSlash < 0):
+        NewDate = sDate
+    else:
+        sMonth = sDate[:i1stSlash]
+        i2ndSlash = sDate.find('/', i1stSlash + 1)
+        #print(i1stSlash)
+        #print(i2ndSlash)
+        #print(i1stSlash+(i2ndSlash-i1stSlash-1))
+        #sDay = DateToConvert[i1stSlash+1:i1stSlash+(i2ndSlash-i1stSlash)]
+        sDay = sDate[i1stSlash+1:i1stSlash+(i2ndSlash-i1stSlash)]
+
+        #print('sMonth: ' + sMonth)
+
+        sDay.replace(' ','')
+        sMonth.replace(' ','')
+        iMonth = int(sMonth)
+        sExtra = ''
+        if (iMonth < 10):
+            sExtra = '0'
+        sMonth = sExtra + str(iMonth)
+
+        iDay = int(sDay)
+        sExtra = ''
+        if (iDay < 10):
+            sExtra = '0'
+        sDay = sExtra + str(iDay)
+
+
+        if (len(DateToConvert) -1 < i2ndSlash + 4):
+            sYear = DateToConvert[-2:]
+            iYear = int(sYear)
+            if (iYear < 60):
+                sYear = "20" + sYear
+            else:
+                sYear = "19" + sYear
+        else:
+            sYear = DateToConvert[-4:]
+
+
+        #print(sYear)
+        #print(sMonth + ' ' + str(len(sMonth)))
+        #print(sDay + ' ' + str(len(sDay)))
+        NewDate = sYear + '-' + sMonth + '-' + sDay
+    
+    return NewDate
+#===================================================
+
+#===================================================
+def SQLInsert(conn, sSQLInsert):
+    try:
+        conn.execute(sSQLInsert)
+        conn.commit()
+        return 1
+    except:
+        print('########################################')
+        print(' ')
+        print('SQL Insert Error')
+        print(sSQLInsert)
+        print(' ')
+        print('########################################')
+        return 0
+
+#===================================================
+def MonthNumFromSymbol(sMonthSymbol):
+    iAnswer = 0
+    if (sMonthSymbol == "F"):
+        iAnswer = 1
+    if (sMonthSymbol == "G"):
+        iAnswer = 2
+    if (sMonthSymbol == "H"):
+        iAnswer = 3
+    if (sMonthSymbol == "J"):
+        iAnswer = 4
+    if (sMonthSymbol == "K"):
+        iAnswer = 5
+    if (sMonthSymbol == "M"):
+        iAnswer = 6
+    if (sMonthSymbol == "N"):
+        iAnswer = 7
+    if (sMonthSymbol == "Q"):
+        iAnswer = 8
+    if (sMonthSymbol == "U"):
+        iAnswer = 9
+    if (sMonthSymbol == "V"):
+        iAnswer = 10
+    if (sMonthSymbol == "X"):
+        iAnswer = 11
+    if (sMonthSymbol == "Z"):
+        iAnswer = 12
+
+    return iAnswer
+#===================================================
+def OptionTitleInfo(sOptFileName):
+    #print(str(sOptFileName.find('EOM')))
+    if (sOptFileName.find('E-miniS&P500') < 0):
+        print('Not an Emini Option')
+    else:
+        OptInfo = sOptFileName.split('_')
+        #print(sOptFileName)
+        #print(OptInfo)
+        #print(OptInfo[0])
+        #print(OptInfo[1])
+        iYear = int(OptInfo[1][:4])
+        iMonth = int(OptInfo[1][-2:])
+        #print(str(iMonth))
+        #print(OptInfo[1][:4])
+        #print(OptInfo[1][5:6])
+        #print(str(iYear))
+        #print(str(iMonth))
+        iWkNum = 0
+        sDOW = ""
+        iLen = len(OptInfo[0])
+        if (iLen == 12):
+            if (iMonth==3) or (iMonth==6) or (iMonth==9) or (iMonth==12):
+                sType = "QTRLY"
+            else:
+                sType = "MONTHLY"
+        else:
+            if (OptInfo[0].find('EOM') >= 0):
+                sType = "EOM"
+            if (OptInfo[0].find('Week') >= 0):
+                sType = "Wkly"
+                sDOW = "Fri"
+                if (OptInfo[0].find('Wednesday') >= 0):
+                    DOW = "Wed"
+                if (OptInfo[0].find('Monday') >= 0):
+                    DOW = "Mon"
+                sWkNum = OptInfo[0][iLen-1:iLen-1]
+                
+            
+        #print(str(iLen))
+        strike = OptInfo[3].split('.')
+        
+        return 'ES',sType,iWkNum,sDOW,OptInfo[2],strike[0],iYear,iMonth,OptInfo[1],OptInfo[0]
+#===================================================
+def EOMDate(iMonth, iYear):
+    sBegOfMonth = str(iMonth) + "/1/" + str(iYear)
+    #print(sBegOfMonth)
+    dtBegOfMonth = datetime.datetime.strptime(sBegOfMonth, '%m/%d/%Y') 
+    #print(dtBegOfMonth)
+    dtLastWeekdayOfMonth = dtBegOfMonth.replace(day=calendar.monthrange(dtBegOfMonth.year,dtBegOfMonth.month)[1])
+
+    if dtLastWeekdayOfMonth.weekday()>=5:
+        dtLastWeekdayOfMonth = dtLastWeekdayOfMonth-timedelta(days=1+dtLastWeekdayOfMonth.weekday()-5)
+
+    dtLastWeekdayOfMonth = dtLastWeekdayOfMonth + timedelta(hours=15)    
+    return dtLastWeekdayOfMonth
+
+#===================================================
+
+def option_expiration(iMonth, iYear, iWeek, sType):
+    # RRoss 20200525
+    iHoursToAdd = 15
+    iMinutesToAdd = 0
+    if (sType == 'E'):
+        #EOM
+        Expiry = EOMDate(iMonth,iYear)
+        bSuccess = True
+    else:
+        if (sType == "F"):
+            iAdj = 2
+        if (sType == "W"):
+            iAdj = 4
+        if (sType == "M"):
+            iAdj = 6
+        if (sType =="Q"):
+            iAdj = 2
+            iWeek = 3
+            iHoursToAdd = 8
+            iMinutesToAdd = 30
+
+            if (iMonth % 3 != 0):
+                iWeek = 10       # Causes error Succss to = False since it's not a quarter 
+        
+        print(calendar.weekday(iYear, iMonth, 1))
+        day = (iWeek * 7) - (calendar.weekday(iYear, iMonth, 1) + iAdj) % 7
+        print('day: ' + str(day))
+        try:
+            Expiry = datetime.datetime(iYear,iMonth, day)
+            bSuccess = True
+        except:
+            Expiry = datetime.datetime(iYear,iMonth, 1)
+            bSuccess = False
+        
+        Expiry = Expiry + timedelta(hours=iHoursToAdd,minutes=iMinutesToAdd)  
+ 
+    return Expiry, Expiry.weekday(), bSuccess
+
+#===================================================
+
+
+#===================================================
+def DowOfWeek(iWeekDay):
+    sAnswer = ""
+    if (iWeekDay == 0):
+        sAnswer = 'Mon'
+    if (iWeekDay == 1):
+        sAnswer = 'Tue'
+    if (iWeekDay == 2):
+        sAnswer = 'Wed'
+    if (iWeekDay == 3):
+        sAnswer = 'Thu'
+    if (iWeekDay == 4):
+        sAnswer = 'Fri'
+    if (iWeekDay == 5):
+        sAnswer = 'Sat'
+    if (iWeekDay == 6):
+        sAnswer = 'Sun'
+
+    return sAnswer
+#===================================================
+
+
+
+#---------------------------------------------------
+#--------- Main Section ----------------------------
+
+conn = pyodbc.connect(r'DRIVER={MySQL ODBC 8.0 UNICODE Driver};SERVER=localhost;UID=root;PWD=T1g3rb0y;')     #PORT=3306;SERVER=localhost;DATABASE=futuresoptions;UID=root;PWD=T1g3rb0y;charset=utf8mb4;')
+cursor = conn.cursor()
+cursor2 = conn.cursor()
+cursorInsert = conn.cursor()
+
+
+#RRoss 20200523 - Roll through Option Directory
+i = 0
+sPrevYrMonth = ""
+iOptionBreedID = 6
+sPrevOptionTitle = ""
+os.chdir('c:\\shared\\data\\options\\es\\serial') 
+files = [f for f in os.listdir('.') if os.path.isfile(f)]
+for f in files:
+    i = i + 1
+    #if (i > 1000):
+    #    break
+    print (f)
+    Sym, sType, iWkNum, sDOW, sCP, sStrike, iYear, iMonth, sYrMonth, sOptDesc = OptionTitleInfo(f)
+    sOptionTitle = sOptDesc + '_' + sYrMonth
+    
+    iLen = len(f)
+    sFullOptDesc = f[:-4]
+    
+    if (False):
+        print(Sym)
+        print(sType)
+        print(str(iWkNum))
+        print(sDOW)
+        print(sCP)
+        print(sStrike)
+        
+    if (sYrMonth != sPrevYrMonth):
+        print(" ")
+        print("sYrMonth != sPrevYrMonth")
+        print(str(iMonth))
+        print(str(iYear))
+        dtLastWeekdayOfMonth = EOMDate(iMonth, iYear)
+        sPrevYrMonth = sYrMonth
+        
+    #print('Last Weekday' + str(dtLastWeekdayOfMonth))
+
+    iStrike = int(sStrike) / 100
+    iStrike = int(iStrike)
+    sAdjStrike = str(iStrike)    
+    
+    #fileStatsObj = os.stat ( 'c:\\shared\\data\\options\\es\\eom\\' + f )
+    sFilePath = 'c:\\shared\\data\\options\\es\\serial\\'
+    sFilePath2 = r'c:\\shared\\data\\options\\es\\serial\\'
+    sFullFilePath = sFilePath2 + f 
+    #print(" ")
+    #print(sFullFilePath)
+    #print(" ")
+    modTimesinceEpoc = os.path.getmtime(sFullFilePath)
+
+    # Convert seconds since epoch to readable timestamp
+    modificationTime = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(modTimesinceEpoc))
+    
+    sFileTime = str(modificationTime)
+    objFileStats = os.stat(sFullFilePath)
+    iFileSize = objFileStats.st_size 
+    #print("File Size: " + str(iFileSize))
+    #print("Last Modified Time : ", sFileTime )
+    
+    #sFullFilePathDoubleSlash = sFullFilePath.replace(r"\",r"\\")
+    
+    iExpiryDOW = dtLastWeekdayOfMonth.weekday()
+    today = date.today()
+    oTime = time.asctime()
+    #print('oTime: ' + oTime)
+    sRandom = oTime + " " + sCP + " " + sAdjStrike + 'ES' + sYrMonth + str(iOptionBreedID)
+    #print('Random: ' + sRandom)
+    
+    #print('Expiry DOW: ' + str(dtLastWeekdayOfMonth.weekday()))
+    # RRoss 20200524 - Update DB that File is being processed
+    sSQLInsert = "Insert into financialdata.FileProcessLog ("
+    sSQLInsert += "FileNameAndPath, "
+    sSQLInsert += "FilePath, FileName, "
+    sSQLInsert += "UnderlyingSymbol,Expiry,FileSize,FileDateTime,CallPut, "
+    sSQLInsert += "Strike,OptExpiryDOW,WeekNum, OptionBreedID, RandomNum)"
+    sSQLInsert += " values ("
+    sSQLInsert += "'" + sFullFilePath + "', "
+    sSQLInsert += "'" + sFilePath2 + "', "
+    sSQLInsert += "'" + f + "', "
+    sSQLInsert += "'ES', "
+    sSQLInsert += "'" + str(dtLastWeekdayOfMonth) + "', "
+    sSQLInsert += "" + str(iFileSize) + ", "
+    sSQLInsert += "'" + modificationTime + "', "
+    sSQLInsert += "'" + sCP + "', "
+    sSQLInsert += "'" + sAdjStrike + "', "
+    sSQLInsert += "'" + DowOfWeek(iExpiryDOW) + "', "
+    sSQLInsert += "" + str(iWkNum) + ", "
+    sSQLInsert += "" + str(iOptionBreedID) + ", "
+    sSQLInsert += "'" + sRandom + "') "
+    print(sSQLInsert)
+    DBInsertSuccess = SQLInsert(conn, sSQLInsert)
+
+    #RRoss 20200524 - Get or Set Group Info
+    if (sOptionTitle != sPrevOptionTitle):
+        sOptionTitle = sPrevOptionTitle
+        sSQL = "Select * from financialdata.OptionGroup "
+        sSQL += " Where OptionBreedID = 6 "
+        sSQL += " and ExpiryDate = '" + str(dtLastWeekdayOfMonth) + "' "
+        sSQL += " and UnderlyingSymbolID = 1 "
+        sSQL += " and DOWExpiry = '" + DowOfWeek(iExpiryDOW) + "' "
+        sSQL += " and OptionMonth = " + str(iMonth)
+        sSQL += " and OptionYear = " + str(iYear)
+        sSQL += " and WeekNum = " + str(iWkNum)
+        
+        print(sSQL)
+
+        cursor2.execute(sSQL)
+        
+        print('Opt Group Rows: ' + str(cursor2.rowcount))
+        bDataExists = False
+        if (cursor2.rowcount > 0):
+            for row in cursor2.fetchall():
+                bDataExists = True
+                iOptGroupID = int(row[0])
+            
+        # RRoss 20200524 - Insert and create new group
+        if (bDataExists == False):
+            sSQLInsert = "Insert into financialdata.OptionGroup ("
+            sSQLInsert += " OptionBreedID, UnderlyingSymbolID, ExpiryDate, "
+            sSQLInsert += " OptionDesc, OptionMonth, OptionYear, "
+            sSQLInsert += " RandomNum, WeekNum, DOWExpiry) "
+            sSQLInsert += " values ("
+            
+            sSQLInsert += "6, 1, "
+            sSQLInsert += "'" +  str(dtLastWeekdayOfMonth) + "', "
+            sSQLInsert += "'" + sOptDesc + "', "
+            sSQLInsert += "" + str(iMonth) + ", "
+            sSQLInsert += "" + str(iYear) + ", "
+            sSQLInsert += "'" + sRandom + "', "
+            sSQLInsert += "" + str(iWkNum) + ", "
+            sSQLInsert += "'" + DowOfWeek(iExpiryDOW) + "') "
+            
+            DBInsertSuccess = SQLInsert(conn, sSQLInsert)
+            
+            sSQL = "Select * from financialdata.OptionGroup "
+            sSQL += " Where RandomNum = '" + sRandom + "' "
+            
+            cursor2.execute(sSQL)
+            print('2nd Try Opt Group Rows: ' + str(cursor2.rowcount))
+            bDataExists = False
+            for row in cursor2.fetchall():
+                bDataExists = True
+                iOptGroupID = int(row[0])
+    
+    print('Opt Group ID: ' + str(iOptGroupID))
+    
+    #RRoss 20200524 Insert Option Header Description info into DB
+    # Todo - check if OPtion exists first and just pull id and then insert
+    sSQL = "Select * from financialdata.OptionDescriptions "
+    sSQL += " Where OptionGroupID = " + str(iOptGroupID)
+    sSQL += " and Expiry = '" + str(dtLastWeekdayOfMonth) + "' "
+    sSQL += " and SymbolID = 'ES' "
+    sSQL += " and DOWExpiry = '" + DowOfWeek(iExpiryDOW) + "' "
+    sSQL += " and OptionMonth = " + str(iMonth)
+    sSQL += " and OptionYear = " + str(iYear)
+    sSQL += " and WeekNum = " + str(iWkNum)
+    sSQL += " and CallOrPut = '" + sCP + "' "
+    sSQL += " and StrikePrice = " + sAdjStrike
+    sSQL += " and OptionBreedID = " + str(iOptionBreedID)
+    
+    print(" ")
+    print(sSQL)
+    print(" ")
+    cursor2.execute(sSQL)
+    print('1st Try Opt Desc: ' + str(cursor2.rowcount))
+    bDataExists = False
+    
+    if (cursor2.rowcount > 0):
+        for row in cursor2.fetchall():
+            bDataExists = True
+            iOptDescID = int(row[0])
+    else:
+        
+        print('IN Opt Desc Insert')
+        
+        sSQLInsert = "Insert into financialdata.OptionDescriptions ("
+        sSQLInsert += "OptionGroupID, SymbolID, UnderlyingSymbol, Expiry,"
+        sSQLInsert += "OptionDesc, OptionMonth, OptionYear, CallOrPut, "
+        sSQLInsert += "StrikePrice, WeekNum, OptionBreedID, DOWExpiry, RandomNum)"
+        sSQLInsert += " values ("
+        sSQLInsert += "" + str(iOptGroupID) + ", 1, 'ES', "
+        sSQLInsert += "'" + str(dtLastWeekdayOfMonth) + "', "
+        sSQLInsert += "'" + sFullOptDesc + "', "
+        sSQLInsert += "" + str(iMonth) + ", "
+        sSQLInsert += "" + str(iYear) + ", "
+        sSQLInsert += "'" + sCP + "', "
+        sSQLInsert += "" + sAdjStrike + ", "
+        sSQLInsert += "" + str(iWkNum) + ", "
+        sSQLInsert += "" + str(iOptionBreedID) + ", "
+        sSQLInsert += "'" + DowOfWeek(iExpiryDOW) + "', "
+        sSQLInsert += "'" + sRandom + "') "
+        
+        print(" ")
+        print(sSQLInsert)
+        print(" ")
+        DBInsertSuccess = SQLInsert(conn, sSQLInsert)
+        
+        sSQL = "Select * from financialdata.OptionDescriptions "
+        sSQL += " Where RandomNum = '" + sRandom + "' "
+
+        cursor2.execute(sSQL)
+        print('2nd Try Opt Desc Rows: ' + str(cursor2.rowcount))
+        bDataExists = False
+        for row in cursor2.fetchall():
+            bDataExists = True
+            iOptDescID = int(row[0])  
+            
+    print('Option Desc ID: ' + str(iOptDescID))        
+    
+    #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    # RRoss 20200524 - Insert Option Trade Details
+    
+    # Open the File
+    fOptTrades = open(sFullFilePath)    #, "r")
+    iDBInsert = 1
+
+    f1 = fOptTrades.readlines()
+    iTradeCnt = 0
+    symbol = ""
+    sSQLValue = ""
+    for x in f1:
+        iTradeCnt += 1
+        #if (iTradeCnt>3):
+        #    break
+        #print(x)
+        data_info = x.split(',')
+        #print(data_info)
+        contract = data_info[0].strip()  
+        iTradeNum = data_info[1].strip()  
+        TradeDate = data_info[2].strip()  
+        TradeDateTime = data_info[3].strip()
+        
+        #-------------------------------------------------------
+        # RRoss 20200524 - Convert TradeDateTime to Military
+        tDateInfo = data_info[3].split(' ')
+        tdDate = tDateInfo[1].split('/')
+        #print(tdDate)
+        tdYear = int(tdDate[2])
+        tdMonth = int(tdDate[0])
+        tdDay = int(tdDate[1])
+        sExtraMonth = ""
+        sExtraDay = ""
+        if (tdMonth < 10):
+            stdMonth = "0" + str(tdMonth)
+        else:
+            stdMonth = str(tdMonth)
+        if (tdDay < 10):
+            stdDay = "0" + str(tdDay)
+        else:
+            stdDay = str(tdDay)
+        
+        #print('tDateInfo')
+        #print(tDateInfo)
+        tTimeInfo = tDateInfo[2].split(':')
+        #print(tTimeInfo)
+        if (tDateInfo[3] == "PM") and (int(tTimeInfo[0]) != 12):
+            itHour = int(tTimeInfo[0]) + 12
+        else:
+            itHour = int(tTimeInfo[0])
+        
+        sTradeDateTime = str(tdYear) + "-" + stdMonth + "-" + stdDay + " " + str(itHour) + ":" + str(tTimeInfo[1]) + ":" + str(tTimeInfo[2])
+        #-------------------------------------------------------
+        
+        Open = data_info[4].strip()  
+        High = data_info[5].strip()  
+        Low = data_info[6].strip()  
+        Close = data_info[7].strip()  
+        Volume = data_info[8].strip()  
+        #print(contract)
+
+        sSQLInsert = "Insert into financialdata.OptionDetails ("
+        sSQLInsert += "OptionDescriptionID, OptionSymbol, Expiry,"
+        sSQLInsert += "OptionMonth, OptionYear, CallOrPut, OptionExtraDesc, "
+
+        sSQLInsert += "StrikePrice, PriceOpen, PriceHigh, PriceLow, PriceClose, Volume, "
+        sSQLInsert += "TradeDateTime, TradeClosePrice, TradeVolume)"
+        sSQLInsert += " values ("
+        sSQLInsert += "" +  str(iOptDescID) + ", "
+        sSQLInsert += "'" + contract + "', "
+        sSQLInsert += "'" + str(dtLastWeekdayOfMonth) + "', "
+        sSQLInsert += "" + str(iMonth) + ", "
+        sSQLInsert += "" + str(iYear) + ", "
+        sSQLInsert += "'" + sCP + "', "
+        sSQLInsert += "'" + sFullOptDesc + "', "
+        sSQLInsert += "" + sAdjStrike + ", "
+        sSQLInsert += "" + Open + ", "
+        sSQLInsert += "" + High + ", "
+        sSQLInsert += "" + Low + ", "
+        sSQLInsert += "" + Close + ", "
+        sSQLInsert += "" + Volume + ", "
+        sSQLInsert += "'" + sTradeDateTime + "', "
+        sSQLInsert += "" + Close + ", "
+        sSQLInsert += "" + Volume + ") "
+        
+        if (iTradeCnt % 100 == 0):
+            print(" ")
+            print(str(iTradeCnt))
+            print(sSQLInsert)
+        
+        DBInsertSuccess = SQLInsert(conn, sSQLInsert)
+
+    
+    
+
+print('<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<')
+print(' ')
+print(' PROCESS FINISHED ')
+print(' ')
+print('>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>')
+        
+conn.close()    
+    
+    
+    
